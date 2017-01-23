@@ -1,95 +1,109 @@
-const int SWITCH_LED = 8;     // Use to turn on LED with switch is colosed
-const int TIMER_LED = 12;     // Use to turn on LED indicating timer is active
-const int TIMEOUT_LED = 13;   // Use to turn on LED when TIMEOUT occurs
-const int MAG_SWITCH = 2;     // Use to monitor Reed Swithch
-const int HOLD_SWITCH = 4;    // Use to read the hold switch
-const int CLOSE_SWITCH = 7;   // Use to close door switch
+#define DOOR_OPEN_LED 13  // Use to control LED with switch is colosed indicating timer is active
+#define HOLD_LED 12       // Use to control LED indicating Hold Open state (toggles with HOLD_BUTTON press) 
+#define MAG_SWITCH 2      // Use to monitor Reed Swithch
+#define HOLD_BUTTON 4     // Use to read the hold button
+#define CLOSE_SWITCH 7    // Use to close door switch
 
-const int TIMEOUT = 5000;     // set TIMEOUT value to 5000 mSec
-const int OPEN = LOW;         // state when switch is open
-const int CLOSED = HIGH;      // state when switch is closed 
-const int ON = HIGH;          // LED ON
-const int OFF = LOW;          // LED OFF
+#define TIMEOUT 5*1000         // time to wait before closing the garage door
+#define CLOSE_TRIGGER_TIME 500 // time to keep relay open
+#define WAIT_AFTER_CLOSE 3*1000  // time to wait after triggering door to close
+#define POLL_DELAY 500         // time to wait between polls
 
-int magSwitchState = -1;      // Variable us to capture Reed switch state 0 is open, 1 is closed
-int holdButtonState = -1;     
-int oldState = -1;            // Previous state of the Reed switch saved when a state change occurs
+#define OPEN LOW          // state when switch is open
+#define CLOSED HIGH       // state when switch is closed 
+#define ON HIGH           // LED ON
+#define OFF LOW           // LED OFF
+#define RELAY_ON 1        // Realy On state is active low
+#define RELAY_OFF 0       // Relay Off state is high
 
-int startTime = -1;           // used to capture time when switch closes
-int delta = 0;                // delta between current and start times
+int magSwitchState = -1;     // Reed switch state - senses that the door is open
+int holdButtonState = -1;    // Hold button state - toggles whether door should be held open
+int holdDoorOpen = 0;        // Should the door be kept open
 
+int timerStarted = 0;           // used to capture time when switch closes
+int delta = 0;               // delta between current and start times
+//////////////////////////////////////////////////////////////////////////////////////////
+//
 // the setup routine runs once when you press reset:
 void setup() {                
-  Serial.begin(9600);
+
+  digitalWrite(DOOR_OPEN_LED, OFF);
+  digitalWrite(HOLD_LED, OFF);
+  digitalWrite(CLOSE_SWITCH, RELAY_OFF); 
+
   // initialize the digital pin as an output.
-  pinMode(SWITCH_LED, OUTPUT);
-  pinMode(TIMER_LED, OUTPUT);
-  pinMode(TIMEOUT_LED, OUTPUT);
-  pinMode(MAG_SWITCH, INPUT);
-  pinMode(HOLD_SWITCH, INPUT);
+  pinMode(MAG_SWITCH, INPUT_PULLUP);
+  pinMode(HOLD_BUTTON, INPUT);
+
+  pinMode(DOOR_OPEN_LED, OUTPUT);
+  pinMode(HOLD_LED, OUTPUT);
   pinMode(CLOSE_SWITCH, OUTPUT);
 
-  digitalWrite(SWITCH_LED, OFF);  // Off
-  digitalWrite(TIMER_LED, OFF);   // Off
-  digitalWrite(TIMEOUT_LED, OFF); // Off
-  digitalWrite(CLOSE_SWITCH, OFF); 
 }  // end setup()
 
+
+//////////////////////////////////////////////////////////////////////////////////////////
+//
 // the loop routine runs over and over again forever:
 void loop() {
-  
+//  Read the mag swith to see if the door is open and read the hold button to see if the 
+//  door should be held open or not
   magSwitchState = digitalRead(MAG_SWITCH);
-Serial.print("m-state=");
-Serial.println(magSwitchState);
-  holdSwitchState = digitalRead(HOLD_SWITCH);
-Serial.print("h-state=");
-Serial.println(holdSwitchState);
+  holdButtonState = digitalRead(HOLD_BUTTON);
 
-  if (holdSwitchState = CLOSED) {  // hold button was pressed (button is Normally Open)
-    digitalWrite(HOLD_LED, ON);
-    delay(2000);
-//    delay(5000);
+  if (holdButtonState == CLOSED) {  // hold button was pressed (button is Normally Open)
+    //  Toggle the button state
+    holdDoorOpen = !holdDoorOpen;
+    //  set the LED on the button appropriately
+    digitalWrite(HOLD_LED, holdDoorOpen);
   }  // end if hold switch closed
-  else {  // hold switch is open
-    digitalWrite(HOLD_LED, OFF);
-    if (magSwitchState != oldState) {  // state of switch changed
-Serial.print("oldstate=");
-Serial.println(oldState);
-      oldState = magSwitchState;
-      
-      if (magSwitchState == OPEN) { // switch has opened (switch is Normally Closed)
-        digitalWrite(SWITCH_LED, ON);
-        digitalWrite(TIMER_LED, ON);
-        startTime = millis();
-Serial.print("start=");
-Serial.println(startTime);
-      }  // end if switch has opened  
-      else { // swith has closed
-        digitalWrite(SWITCH_LED, OFF);
-        digitalWrite(TIMER_LED, OFF);
-        digitalWrite(TIMEOUT_LED, OFF);
-        startTime = -1;
-        delta = 0;
-Serial.print("end timer: start=");
-Serial.println(startTime);
-      }  // end else switch has closed
-    }  // end if state of switch changed
-      
-    if (startTime != -1) {  // timer is running
-      delta = millis() - startTime;
-Serial.print("delta=");
-Serial.println(delta);
+
+  if (!holdDoorOpen) {  // the door should not be held open
+    // if the mag switch opened, the door is open and the timer is not running
+    // turn on the LED and start the timer
+    if (magSwitchState == OPEN) { 
+      // if timer is not running yet, start it and turn on the LED
+      if (!timerStarted) { 
+        digitalWrite(DOOR_OPEN_LED, ON);
+        timerStarted = millis();
+      } // end if timer is not running
+      else {
+      }
+    }  // end if switch is open
+    else { // swith has closed (door has closed)
+      // turn off the LED and clear out the timer
+      digitalWrite(DOOR_OPEN_LED, OFF);
+      timerStarted = 0;
+      delta = 0;
+    }  // end else switch has closed
+
+    // if the timer is running check for timeout and close door if expired
+    if (timerStarted) {  
+      // compute the time since the timer started
+      delta = millis() - timerStarted;
       if (delta > TIMEOUT) {  // timer expired
-        digitalWrite(TIMER_LED, OFF);
-        digitalWrite(TIMEOUT_LED, ON);
+        // turn on the relay for 1/2 second then turn back off to close the garage door
         digitalWrite(CLOSE_SWITCH, ON);
-        delay(500);
-        digitalWrite(TIMEOUT_LED, OFF);
+        delay(CLOSE_TRIGGER_TIME);
         digitalWrite(CLOSE_SWITCH, OFF);
-        startTime = -1;
+
+        delay(WAIT_AFTER_CLOSE);
+        
+        // reset the timer
+        timerStarted = 0;
         delta = 0;
       }  // end if timer expired
     }  // end if timer is running
-  }  // end else holdSwitch open
-    delay(1000);  // wait a second before looping again
+  }  // end if not hold door open
+  else { //the door should be held open
+    // check to see if the timer was started before the hold button was pressed
+    if (timerStarted) {  // timer is running
+      // reset the timer
+      timerStarted = 0;
+      delta = 0;
+    }  // end if timer is running
+  }  // end if hold door open
+
+  delay(POLL_DELAY);  // wait a second before looping again
 }  // end loop()
+
